@@ -91,7 +91,19 @@ $('pause').disabled=false;$('stop').disabled=false;lock();
 clearInterval(timer);timer=setInterval(tick,100);tick();
 if('mediaSession' in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:'Interval Timer',artist:c.rounds+' รอบ × '+c.iv+' วินาที'})};
 
-$('pause').onclick=()=>{if(audio.paused){audio.play();lock();$('pause').textContent='พัก'}else{audio.pause();unlock();$('pause').textContent='ต่อ'}};
+let pos=0,reloading=false;
+audio.addEventListener('pause',()=>{if(!reloading&&cfg&&!audio.ended)pos=audio.currentTime});
+function doPause(){audio.pause();unlock();$('pause').textContent='ต่อ'}
+function doResume(){ // โหลดไฟล์เสียงใหม่แล้วต่อจากตำแหน่งเดิม (กัน iOS เสียงเงียบหลังกดต่อจากหน้าล็อก)
+ if(!cfg)return;const p=pos;reloading=true;audio.src=url;
+ audio.addEventListener('loadedmetadata',function f(){audio.removeEventListener('loadedmetadata',f);
+  audio.currentTime=p;audio.play().catch(()=>{}).finally(()=>{reloading=false})});
+ audio.load();lock();$('pause').textContent='พัก'}
+$('pause').onclick=()=>{audio.paused?doResume():doPause()};
+if('mediaSession' in navigator){const ms=navigator.mediaSession;
+ ms.setActionHandler('play',doResume);ms.setActionHandler('pause',doPause);
+ ms.setActionHandler('stop',()=>$('stop').click());
+ for(const a of['seekto','seekbackward','seekforward','previoustrack','nexttrack'])try{ms.setActionHandler(a,null)}catch(e){}}
 $('stop').onclick=()=>{audio.pause();audio.currentTime=0;reset()};
 audio.addEventListener('ended',()=>{clearInterval(timer);unlock();$('label').textContent='เสร็จสิ้น';$('big').textContent='0';
 $('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true});
