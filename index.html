@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Interval">
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Interval Timer</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#111;color:#f2f2f2;font-family:-apple-system,"Sukhumvit Set",sans-serif;
+padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 16px);
+min-height:100vh;display:flex;flex-direction:column;gap:14px}
+h1{font-size:18px;margin:0;color:#aaa;font-weight:600}
+#big{font-size:min(38vw,160px);font-weight:700;text-align:center;line-height:1;font-variant-numeric:tabular-nums}
+#label{text-align:center;font-size:22px;color:#ffb84d;min-height:30px}
+.row{display:flex;gap:10px}
+.row label{flex:1;font-size:13px;color:#aaa;display:flex;flex-direction:column;gap:4px}
+input[type=number]{width:100%;font-size:22px;padding:10px;border-radius:10px;border:1px solid #333;background:#1c1c1c;color:#fff}
+button{font-size:20px;padding:16px;border-radius:14px;border:0;font-weight:600;flex:1}
+#start{background:#2fb55a;color:#fff}#pause{background:#444;color:#fff}#stop{background:#b53a2f;color:#fff}
+button:disabled{opacity:.4}
+small{color:#888;text-align:center}
+</style></head><body>
+<h1>Interval Timer</h1>
+<div id="label">พร้อมเริ่ม</div>
+<div id="big">--</div>
+<div class="row">
+<label>นับถอยหลัง (วินาที)<input id="cd" type="number" min="0" max="30" value="3"></label>
+<label>ทุก ๆ (วินาที)<input id="iv" type="number" min="5" max="600" value="45"></label>
+<label>จำนวนรอบ<input id="rounds" type="number" min="1" max="200" value="10"></label>
+</div>
+<label style="font-size:15px;color:#ccc"><input id="wl" type="checkbox" checked> ให้หน้าจอค้างเปิดระหว่างจับเวลา</label>
+<div class="row"><button id="start">เริ่ม</button><button id="pause" disabled>พัก</button><button id="stop" disabled>หยุด</button></div>
+<small id="info">เสียง: ติ๊กนับถอยหลัง → บี๊บเริ่ม → บี๊บทุกครบรอบ (ล็อกจอได้ เสียงเล่นต่อเหมือนเพลง)</small>
+<script>
+const $=id=>document.getElementById(id), SR=16000;
+const audio=new Audio(); let cfg=null,url=null,wake=null,timer=null;
+
+function wav(f){const n=f.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);
+const s=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+s(0,'RIFF');v.setUint32(4,36+n*2,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);
+v.setUint16(22,1,true);v.setUint32(24,SR,true);v.setUint32(28,SR*2,true);v.setUint16(32,2,true);
+v.setUint16(34,16,true);s(36,'data');v.setUint32(40,n*2,true);
+for(let i=0;i<n;i++){const x=Math.max(-1,Math.min(1,f[i]));v.setInt16(44+i*2,x<0?x*0x8000:x*0x7fff,true)}
+return new Blob([b],{type:'audio/wav'})}
+
+function beep(ctx,t,freq,dur,vol){const o=ctx.createOscillator(),g=ctx.createGain();
+o.frequency.value=freq;o.connect(g);g.connect(ctx.destination);
+g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+0.01);
+g.gain.setValueAtTime(vol,t+dur-0.03);g.gain.linearRampToValueAtTime(0,t+dur);o.start(t);o.stop(t+dur)}
+
+async function build(c){
+const total=c.cd+c.rounds*c.iv+1.5;
+const ctx=new OfflineAudioContext(1,Math.ceil(total*SR),SR);
+for(let i=0;i<c.cd;i++)beep(ctx,i,660,0.15,0.6);        // ติ๊กนับถอยหลัง
+beep(ctx,c.cd,1000,0.6,0.9);                             // เสียงเริ่ม
+for(let k=1;k<=c.rounds;k++)beep(ctx,c.cd+k*c.iv,1000,k===c.rounds?1.2:0.6,0.9); // ครบรอบ
+const buf=await ctx.startRendering();
+return wav(buf.getChannelData(0))}
+
+async function lock(){try{if($('wl').checked&&'wakeLock' in navigator)wake=await navigator.wakeLock.request('screen')}catch(e){}}
+function unlock(){try{wake&&wake.release()}catch(e){}wake=null}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cfg&&!audio.paused)lock()});
+
+function tick(){if(!cfg)return;const t=audio.currentTime,c=cfg;
+if(t<c.cd){$('label').textContent='เตรียมตัว';$('big').textContent=Math.ceil(c.cd-t)}
+else{const e=t-c.cd;
+ if(e>=c.rounds*c.iv){$('label').textContent='เสร็จสิ้น';$('big').textContent='0';return}
+ const k=Math.floor(e/c.iv)+1;
+ $('label').textContent='รอบ '+k+' / '+c.rounds;
+ $('big').textContent=Math.ceil(c.iv-(e-(k-1)*c.iv))}}
+
+function reset(msg){clearInterval(timer);unlock();cfg=null;
+$('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true;$('pause').textContent='พัก';
+$('label').textContent=msg||'พร้อมเริ่ม';$('big').textContent='--'}
+
+$('start').onclick=async()=>{
+const c={cd:+$('cd').value,iv:+$('iv').value,rounds:+$('rounds').value};
+if(!(c.cd>=0&&c.iv>=5&&c.rounds>=1)||c.cd+c.rounds*c.iv>3600){alert('ค่าไม่ถูกต้อง (รวมต้องไม่เกิน 60 นาที)');return}
+// ปลดล็อกเสียงด้วยการแตะของผู้ใช้ (ต้องเรียกแบบ synchronous ก่อน await)
+audio.src=URL.createObjectURL(wav(new Float32Array(1600)));audio.play().catch(()=>{});
+$('start').disabled=true;$('label').textContent='กำลังสร้างเสียง...';
+try{const blob=await build(c);if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(blob);
+ audio.src=url;cfg=c;await audio.play()}catch(e){reset('เล่นเสียงไม่ได้: '+e.message);return}
+$('pause').disabled=false;$('stop').disabled=false;lock();
+clearInterval(timer);timer=setInterval(tick,100);tick();
+if('mediaSession' in navigator)navigator.mediaSession.metadata=new MediaMetadata({title:'Interval Timer',artist:c.rounds+' รอบ × '+c.iv+' วินาที'})};
+
+$('pause').onclick=()=>{if(audio.paused){audio.play();lock();$('pause').textContent='พัก'}else{audio.pause();unlock();$('pause').textContent='ต่อ'}};
+$('stop').onclick=()=>{audio.pause();audio.currentTime=0;reset()};
+audio.addEventListener('ended',()=>{clearInterval(timer);unlock();$('label').textContent='เสร็จสิ้น';$('big').textContent='0';
+$('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true});
+
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
